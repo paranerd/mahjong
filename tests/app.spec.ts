@@ -23,9 +23,11 @@ test('matches, undo, save, settings and layout switching', async ({ page }) => {
   await page.locator('#menu').click();
   await page.locator('[data-theme="light"]').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.locator('#settings .close-dialog').click();
+  await page.locator('#open-new-game').click();
   await page.locator('[data-layout="lotus"]').click();
   await page.locator('#new-game').click();
-  await expect(page.locator('.tile')).toHaveCount(112);
+  await expect(page.locator('.tile')).toHaveCount(144);
   await expect(page.locator('#layout-name')).toHaveText('Lotus');
   expect(errors).toEqual([]);
 });
@@ -46,6 +48,15 @@ for (const [width, height] of [[1440, 900], [390, 844], [844, 390], [320, 568], 
     expect(result.overflow).toBe(false);
     expect(result.cropped).toBe(0);
     expect(result.minWidth).toBeGreaterThan(20);
+    await expect(page.locator('#toast')).toHaveCSS('opacity', '1');
+    const toast = await page.locator('#toast').boundingBox();
+    const info = await page.locator('.round-info').boundingBox();
+    const actions = await page.locator('.corner-actions').boundingBox();
+    expect(toast!.x).toBeGreaterThan(info!.x + info!.width + 5);
+    expect(toast!.x + toast!.width).toBeLessThan(actions!.x - 5);
+    expect(Math.abs(toast!.x + toast!.width / 2 - (info!.x + info!.width + actions!.x) / 2)).toBeLessThan(2);
+    expect(toast!.y).toBeLessThan(info!.y + 12);
+
     if (width === 1440 || width === 390 || width === 844) await page.screenshot({ path: `test-results/${test.info().project.name}-${width}x${height}.png` });
 
   });
@@ -78,6 +89,13 @@ test('reset in the toolbar restores the original deal', async ({ page }) => {
   await page.locator(`[data-id="${pair[1].id}"]`).click();
   await expect(page.locator('#reset')).toBeEnabled();
   await page.locator('#reset').click();
+  await expect(page.locator('#confirm-action')).toBeVisible();
+  await expect(page.locator('#cancel-action')).toBeFocused();
+  await expect(page.locator('#remaining')).toHaveText('71');
+  await page.locator('#cancel-action').click();
+  await expect(page.locator('#remaining')).toHaveText('71');
+  await page.locator('#reset').click();
+  await page.locator('#accept-action').click();
   const reset: Game = await page.evaluate(() => JSON.parse(localStorage.getItem('mahjong.game.v1')!));
   expect(reset.removed).toEqual([]);
   expect(reset.tiles.map(t => t.face)).toEqual(initial.initialFaces);
@@ -101,14 +119,14 @@ test('shows victory after removing the last pair', async ({ page }) => {
   await expect(page.locator('#victory')).toBeVisible();
   await expect(page.locator('#remaining')).toHaveText('0');
   await page.locator('#play-again').click();
-  await expect(page.locator('#settings')).toBeVisible();
+  await expect(page.locator('#new-game-dialog')).toBeVisible();
 });
 
 
 test('uniform tiles by default; highlighting is optional and persists', async ({ page }) => {
   await page.goto('./');
   await expect(page.locator('.dimmed')).toHaveCount(0);
-  await expect(page.locator('#zoom, #shuffle, #restart, #offline-note, #replace-note')).toHaveCount(0);
+  await expect(page.locator('#zoom, #restart, #offline-note, #replace-note')).toHaveCount(0);
   const filters = await page.locator('.tile').evaluateAll(tiles => [...new Set(tiles.map(t => getComputedStyle(t).filter))]);
   expect(filters).toEqual(['none']);
   await page.locator('#menu').click();
@@ -120,7 +138,7 @@ test('uniform tiles by default; highlighting is optional and persists', async ({
   await page.locator('#menu').click();
   await expect(page.locator('#highlight-free')).toBeChecked();
   await page.locator('#highlight-free').uncheck();
-  await page.locator('.close-dialog').click();
+  await page.locator('#settings .close-dialog').click();
   await expect(page.locator('.dimmed')).toHaveCount(0);
 });
 
@@ -221,4 +239,126 @@ test('reduced motion skips the collision flight and keeps game state correct', a
   await expect(page.locator('.match-effect')).toHaveCount(0);
   await expect(page.locator('#remaining')).toHaveText('71');
   await expect(page.locator('#undo')).toBeEnabled();
+});
+
+
+for (const [width, height] of [[768, 1024], [1024, 768], [834, 1194], [1194, 834]]) {
+  test(`tablet ${width}×${height} keeps the title below the safe area`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await page.goto('./');
+    await page.evaluate(() => document.documentElement.style.setProperty('--safe-top', '24px'));
+    await page.waitForTimeout(1100);
+    const title = await page.locator('#layout-name').boundingBox();
+    expect(title!.y).toBeGreaterThanOrEqual(64);
+    const info = await page.locator('.round-info').boundingBox();
+    const arena = await page.locator('#arena').boundingBox();
+    expect(arena!.y).toBeGreaterThan(info!.y + info!.height + 12);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight > innerHeight)).toBe(false);
+    if (width === 768 || width === 1024) await page.screenshot({ path: `test-results/${test.info().project.name}-ipad-${width}.png` });
+  });
+}
+
+for (const layout of ['turtle', 'bridge', 'lotus']) {
+  test(`${layout}: all three difficulties keep their tile counts after reloading`, async ({ page }) => {
+    await page.goto('./');
+    for (const [difficulty, count] of [['easy', 48], ['medium', 96], ['hard', 144]] as const) {
+      await page.locator('#open-new-game').click();
+      await page.locator(`[data-layout="${layout}"]`).click();
+      await page.locator(`[data-difficulty="${difficulty}"]`).click();
+      await expect(page.locator(`[data-difficulty="${difficulty}"] small`)).toHaveText(`${count} Steine`);
+      if (layout === 'turtle' && difficulty === 'medium') await page.screenshot({ path: `test-results/${test.info().project.name}-difficulty-settings.png` });
+      await page.locator('#new-game').click();
+      await expect(page.locator('.tile')).toHaveCount(count);
+      await expect(page.locator('#remaining')).toHaveText(String(count / 2));
+      await page.reload();
+      await expect(page.locator('.tile')).toHaveCount(count);
+      const g: Game = await page.evaluate(() => JSON.parse(localStorage.getItem('mahjong.game.v1')!));
+      expect(g.difficulty).toBe(difficulty);
+      expect(matches(g).length).toBeGreaterThan(0);
+    }
+  });
+}
+
+test('shuffle requires confirmation and preserves removed tiles', async ({ page }) => {
+  await page.goto('./');
+  await page.waitForTimeout(1100);
+  const g: Game = await page.evaluate(() => JSON.parse(localStorage.getItem('mahjong.game.v1')!));
+  const [a,b] = matches(g)[0];
+  await page.locator(`[data-id="${a.id}"]`).click();
+  await page.locator(`[data-id="${b.id}"]`).click();
+  await expect(page.locator('#shuffle')).toBeEnabled();
+  const before: Game = await page.evaluate(() => JSON.parse(localStorage.getItem('mahjong.game.v1')!));
+  await page.locator('#shuffle').click();
+  await expect(page.locator('#confirm-action')).toBeVisible();
+  await expect(page.locator('#confirm-title')).toHaveText('Neu mischen?');
+  await page.screenshot({ path: `test-results/${test.info().project.name}-shuffle-confirmation.png` });
+  await expect(page.locator('#cancel-action')).toBeFocused();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('mahjong.game.v1')!))).toEqual(before);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#confirm-action')).not.toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('mahjong.game.v1')!))).toEqual(before);
+  await page.keyboard.press('m');
+  await expect(page.locator('#confirm-action')).toBeVisible();
+  await page.locator('#accept-action').click();
+  await expect(page.locator('#shuffle')).toBeEnabled();
+  const after: Game = await page.evaluate(() => JSON.parse(localStorage.getItem('mahjong.game.v1')!));
+  expect(after.removed).toEqual(before.removed);
+  expect(after.history).toEqual([]);
+  expect(after.initialFaces).toEqual(before.initialFaces);
+  expect(activeTiles(after).map(t => t.face).sort()).toEqual(activeTiles(before).map(t => t.face).sort());
+  expect(matches(after).length).toBeGreaterThan(0);
+  await expect(page.locator('#remaining')).toHaveText('71');
+  await page.locator('#reset').click();
+  await page.locator('#accept-action').click();
+  await expect(page.locator('#remaining')).toHaveText('72');
+  const reset: Game = await page.evaluate(() => JSON.parse(localStorage.getItem('mahjong.game.v1')!));
+  expect(reset.tiles.map(t => t.face)).toEqual(before.initialFaces);
+});
+
+test('new game options and confirmations fit a narrow phone', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto('./');
+  const tools = await page.locator('.tools').boundingBox();
+  expect(tools!.x).toBeGreaterThanOrEqual(10);
+  expect(tools!.x + tools!.width).toBeLessThanOrEqual(310);
+  await page.locator('#open-new-game').click();
+  await expect(page.locator('[data-difficulty="easy"]')).toBeVisible();
+  await page.locator('[data-difficulty="easy"]').click();
+  await page.locator('#new-game').click();
+  await page.locator('#shuffle').click();
+  await expect(page.locator('#confirm-action')).toBeVisible();
+  const dialog = await page.locator('#confirm-action').boundingBox();
+  expect(dialog!.x).toBeGreaterThanOrEqual(10);
+  expect(dialog!.x + dialog!.width).toBeLessThanOrEqual(310);
+  await expect(page.locator('#cancel-action')).toBeVisible();
+});
+
+
+test('settings and new game have separate overlays and preserve a cancelled round', async ({ page }) => {
+  await page.goto('./');
+  const before = await page.evaluate(() => localStorage.getItem('mahjong.game.v1'));
+  await page.getByRole('button', { name: 'Einstellungen und Anleitung', exact: true }).click();
+  await expect(page.locator('#settings')).toBeVisible();
+  await expect(page.locator('#new-game-dialog')).not.toBeVisible();
+  await expect(page.locator('#settings [data-layout], #settings [data-difficulty], #settings #new-game')).toHaveCount(0);
+  await expect(page.locator('#settings #highlight-free')).toBeVisible();
+  await page.locator('#settings summary').click();
+  await expect(page.locator('#settings details')).toHaveAttribute('open', '');
+  await page.screenshot({ path: `test-results/${test.info().project.name}-settings-only.png` });
+  await page.locator('#settings .close-dialog').click();
+  await expect(page.getByRole('button', { name: 'Einstellungen und Anleitung', exact: true })).toBeFocused();
+  await page.getByRole('button', { name: 'Neues Spiel', exact: true }).click();
+  await expect(page.locator('#new-game-dialog')).toBeVisible();
+  await expect(page.locator('#settings')).not.toBeVisible();
+  await expect(page.locator('#new-game-dialog [data-theme], #new-game-dialog details')).toHaveCount(0);
+  await page.locator('[data-difficulty="easy"]').click();
+  await page.locator('[data-layout="lotus"]').click();
+  await page.screenshot({ path: `test-results/${test.info().project.name}-new-game-only.png` });
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#new-game-dialog')).not.toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('mahjong.game.v1'))).toBe(before);
+  await page.locator('#open-new-game').click();
+  await expect(page.locator('[data-difficulty="hard"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#new-game-dialog .close-dialog').click();
+  await expect(page.locator('#new-game-dialog')).not.toBeVisible();
 });

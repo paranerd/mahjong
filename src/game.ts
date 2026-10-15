@@ -1,9 +1,11 @@
 export type LayoutId = 'turtle' | 'bridge' | 'lotus';
+export type DifficultyId = 'easy' | 'medium' | 'hard';
 export interface Position { id: number; x: number; y: number; z: number }
 export interface Tile extends Position { face: number }
 export interface Game {
   version: 1;
   layout: LayoutId;
+  difficulty?: DifficultyId;
   tiles: Tile[];
   initialFaces: number[];
   removed: number[];
@@ -11,11 +13,17 @@ export interface Game {
   started: number;
 }
 export const layouts: { id: LayoutId; name: string; description: string }[] = [
-  { id: 'turtle', name: 'Schildkröte', description: 'Der Klassiker · 144 Steine' },
-  { id: 'bridge', name: 'Brücke', description: 'Klare Linien · 112 Steine' },
-  { id: 'lotus', name: 'Lotus', description: 'Sanfte Symmetrie · 112 Steine' },
+  { id: 'turtle', name: 'Schildkröte', description: 'Der Klassiker' },
+  { id: 'bridge', name: 'Brücke', description: 'Klare Linien' },
+  { id: 'lotus', name: 'Lotus', description: 'Sanfte Symmetrie' },
 ];
-export function positions(layout: LayoutId): Position[] {
+export const difficulties: { id: DifficultyId; name: string; count: number }[] = [
+  { id: 'easy', name: 'Leicht', count: 48 },
+  { id: 'medium', name: 'Mittel', count: 96 },
+  { id: 'hard', name: 'Schwer', count: 144 },
+];
+// Keep pre-difficulty saves in their original geometry.
+function legacyPositions(layout: LayoutId): Position[] {
   const result: Position[] = [];
   const row = (width: number, y: number, z: number, offset = (14 - width) / 2) => {
     for (let x = 0; x < width; x++) result.push({ id: result.length, x: x + offset, y, z });
@@ -32,6 +40,39 @@ export function positions(layout: LayoutId): Position[] {
     [6, 10, 12, 14, 14, 12, 10, 6].forEach((w, y) => row(w, y, 0));
     for (let y = 2; y < 6; y++) row(6, y, 1);
     for (let y = 3; y < 5; y++) row(2, y, 2);
+  }
+  return result;
+}
+export function positions(layout: LayoutId, difficulty: DifficultyId = 'hard'): Position[] {
+  if (layout === 'turtle' && difficulty === 'hard') return legacyPositions(layout);
+  const result: Position[] = [];
+  const row = (width: number, y: number, z: number, offset = (14 - width) / 2) => {
+    for (let x = 0; x < width; x++) result.push({ id: result.length, x: x + offset, y, z });
+  };
+  const rows = (widths: number[], start: number, z = 0) => widths.forEach((width, i) => row(width, start + i, z));
+  if (layout === 'turtle') {
+    if (difficulty === 'easy') { rows([6, 8, 8, 8, 8, 6], 1); rows([2, 2], 3, 1); }
+    else { rows([8, 10, 12, 12, 12, 12, 10, 8], 0); rows([6, 6], 3, 1); }
+  } else if (layout === 'bridge') {
+    if (difficulty === 'easy') {
+      rows([10, 10, 10, 10], 2);
+      for (const y of [3, 4]) { row(2, y, 1, 2); row(2, y, 1, 10); }
+    } else if (difficulty === 'medium') {
+      rows(Array(6).fill(12), 1);
+      for (const y of [2, 3, 4, 5]) { row(3, y, 1, 1); row(3, y, 1, 10); }
+    } else {
+      rows(Array(8).fill(14), 0);
+      for (const y of [2, 3, 4, 5]) { row(4, y, 1, 0); row(4, y, 1, 10); }
+    }
+  } else {
+    if (difficulty === 'easy') {
+      rows([4, 6, 8, 8, 6, 4], 1); rows([4, 4], 3, 1); rows([2, 2], 3, 2);
+    } else if (difficulty === 'medium') {
+      rows([6, 10, 12, 14, 14, 12, 10, 6], 0); rows([4, 4], 3, 1); rows([2, 2], 3, 2);
+    } else {
+      rows([6, 10, 12, 14, 14, 12, 10, 6], 0);
+      rows([10, 10, 10, 10], 2, 1); rows([8, 8], 3, 2); rows([2, 2], 3, 3);
+    }
   }
   return result;
 }
@@ -84,14 +125,14 @@ export function removalPlan(input: Position[], random = Math.random): number[][]
   }
   return search(input);
 }
-export function createGame(layout: LayoutId, random = Math.random): Game {
-  const places = positions(layout);
+export function createGame(layout: LayoutId, random = Math.random, difficulty: DifficultyId = 'hard'): Game {
+  const places = positions(layout, difficulty);
   const plan = removalPlan(places, random);
   if (!plan) throw new Error('Die Startstellung konnte nicht erzeugt werden.');
   const faces = shuffled(Array.from({ length: places.length / 2 }, (_, i) => i % 36), random);
   const assigned = new Map<number, number>();
   plan.forEach((pair, i) => pair.forEach(id => assigned.set(id, faces[i])));
-  return { version: 1, layout, tiles: places.map(p => ({ ...p, face: assigned.get(p.id)! })), initialFaces: places.map(p => assigned.get(p.id)!), removed: [], history: [], started: Date.now() };
+  return { version: 1, layout, difficulty, tiles: places.map(p => ({ ...p, face: assigned.get(p.id)! })), initialFaces: places.map(p => assigned.get(p.id)!), removed: [], history: [], started: Date.now() };
 }
 export function removePair(game: Game, a: number, b: number): boolean {
   const active = activeTiles(game);
@@ -113,11 +154,29 @@ export function reset(game: Game): void {
   game.history = [];
   game.started = Date.now();
 }
+export function reshuffle(game: Game, random = Math.random): boolean {
+  const active = activeTiles(game);
+  if (!active.length) return false;
+  const plan = removalPlan(active, random);
+  if (!plan) return false;
+  const counts = new Map<number, number>();
+  active.forEach(tile => counts.set(tile.face, (counts.get(tile.face) ?? 0) + 1));
+  const faces: number[] = [];
+  for (const [face, count] of counts) {
+    if (count % 2) return false;
+    for (let i = 0; i < count / 2; i++) faces.push(face);
+  }
+  const mixed = shuffled(faces, random);
+  plan.forEach((pair, i) => pair.forEach(id => { game.tiles[id].face = mixed[i]; }));
+  game.history = [];
+  return true;
+}
 export function validSavedGame(value: unknown): value is Game {
   if (!value || typeof value !== 'object') return false;
   const g = value as Game;
   if (g.version !== 1 || !layouts.some(l => l.id === g.layout) || !Array.isArray(g.tiles) || !Array.isArray(g.removed) || !Array.isArray(g.history) || !Number.isFinite(g.started)) return false;
-  const expected = positions(g.layout);
+  if (g.difficulty !== undefined && !difficulties.some(d => d.id === g.difficulty)) return false;
+  const expected = g.difficulty === undefined ? legacyPositions(g.layout) : positions(g.layout, g.difficulty);
   if (g.tiles.length !== expected.length || !Array.isArray(g.initialFaces) || g.initialFaces.length !== expected.length || !g.initialFaces.every(f => Number.isInteger(f) && f >= 0 && f < 36)) return false;
   if (!g.tiles.every((t, i) => t && t.id === i && t.x === expected[i].x && t.y === expected[i].y && t.z === expected[i].z && Number.isInteger(t.face) && t.face >= 0 && t.face < 36)) return false;
   const ids = new Set(g.removed);

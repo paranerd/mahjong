@@ -1,5 +1,5 @@
 import './style.scss';
-import { activeTiles, createGame, isFree, layouts, matches, removePair, reset, undo, validSavedGame, type Game, type LayoutId } from './game';
+import { activeTiles, createGame, difficulties, isFree, layouts, matches, removePair, reshuffle, reset, undo, validSavedGame, type DifficultyId, type Game, type LayoutId } from './game';
 import { faceLabel, faceSVG, icon } from './faces';
 
 const SAVE_KEY = 'mahjong.game.v1';
@@ -18,6 +18,8 @@ let zoomScale = 1;
 let pan = { x: 0, y: 0 };
 let busy = false;
 let chosenLayout: LayoutId = game.layout;
+let chosenDifficulty: DifficultyId = game.difficulty ?? 'hard';
+let pendingAction: 'shuffle' | 'reset' | null = null;
 let highlightFree = false;
 try { highlightFree = localStorage.getItem(HIGHLIGHT_KEY) === 'true'; } catch { /* Optional preference. */ }
 let theme = 'dark';
@@ -27,37 +29,53 @@ if (!['dark', 'light', 'system'].includes(theme)) theme = 'dark';
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
   <main class="table" aria-label="Mahjong Solitaire">
+    <div class="hud">
     <div class="round-info"><span class="eyebrow" id="layout-name"></span><div class="remaining"><span id="remaining">72</span><span class="remaining-label">PAARE ÜBRIG</span></div></div>
-    <div class="corner-actions"><button class="icon-button" id="menu" aria-label="Menü und neues Spiel" title="Menü">${icon('menu')}</button></div>
-    <div class="arena" id="arena"><div class="board" id="board" role="group" aria-label="Spielfeld"></div></div>
-    <div class="board-message" id="board-message" hidden><span>Kein freies Paar</span><p>Gehe einen Zug zurück oder starte die Runde mit Reset neu.</p></div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="corner-actions"><button class="icon-button" id="open-new-game" aria-label="Neues Spiel" title="Neues Spiel">${icon('plus')}</button><button class="icon-button" id="menu" aria-label="Einstellungen und Anleitung" title="Einstellungen und Anleitung">${icon('settings')}</button></div>
+    </div>
+    <div class="arena" id="arena"><div class="board" id="board" role="group" aria-label="Spielfeld"></div></div>
+    <div class="board-message" id="board-message" hidden><span>Kein freies Paar</span><p>Mische die Steine oder gehe einen Zug zurück.</p></div>
     <nav class="tools" aria-label="Spielaktionen">
       <button id="undo" title="Rückgängig (Strg/⌘ + Z)">${icon('undo')}<span>Zurück</span></button>
       <span class="tool-divider"></span>
       <button id="hint" title="Hinweis (H)">${icon('hint')}<span>Hinweis</span></button>
       <span class="tool-divider"></span>
+      <button id="shuffle" title="Steine mischen (M)">${icon('shuffle')}<span>Mischen</span></button>
+      <span class="tool-divider"></span>
       <button id="reset" title="Runde zurücksetzen (R)">${icon('reset')}<span>Reset</span></button>
     </nav>
     <div class="sr-only" id="announcer" aria-live="polite" aria-atomic="true"></div>
   </main>
-  <dialog id="settings" aria-labelledby="settings-title">
-    <div class="dialog-top"><span class="eyebrow">EIN RUHIGER MOMENT</span><button class="icon-button close-dialog" aria-label="Menü schließen">${icon('close')}</button></div>
-    <h1 id="settings-title">Mahjong<span class="title-dot">.</span></h1>
-    <p class="dialog-intro">Ein Paar nach dem anderen.</p>
-    <h2>Dein nächstes Spiel</h2>
+  <dialog id="new-game-dialog" aria-labelledby="new-game-title">
+    <div class="dialog-top"><span class="eyebrow">EIN NEUER ANFANG</span><button class="icon-button close-dialog" aria-label="Neues Spiel schließen">${icon('close')}</button></div>
+    <h1 id="new-game-title">Neues Spiel<span class="title-dot">.</span></h1>
+    <p class="dialog-intro">Dein Spielfeld. Dein Tempo.</p>
     <div class="layout-options" role="group" aria-label="Spielfeld wählen">${layouts.map(l => `<button class="layout-option" data-layout="${l.id}" aria-pressed="${l.id === game.layout}"><span class="layout-preview" data-preview="${l.id}" aria-hidden="true"></span><span><strong>${l.name}</strong><small>${l.description}</small></span><span class="layout-check">${icon('check')}</span></button>`).join('')}</div>
-    <button class="primary-button" id="new-game">${icon('plus')}Neues Spiel</button>
+    <div class="difficulty-options" role="group" aria-label="Schwierigkeit wählen">${difficulties.map(d => `<button data-difficulty="${d.id}" aria-pressed="${d.id === chosenDifficulty}"><strong>${d.name}</strong><small>${d.count} Steine</small></button>`).join('')}</div>
+    <button class="primary-button" id="new-game">${icon('plus')}Spiel starten</button>
+  </dialog>
+  <dialog id="settings" aria-labelledby="settings-title">
+    <div class="dialog-top"><span class="eyebrow">EIN RUHIGER MOMENT</span><button class="icon-button close-dialog" aria-label="Einstellungen schließen">${icon('close')}</button></div>
+    <h1 id="settings-title">Einstellungen<span class="title-dot">.</span></h1>
+    <p class="dialog-intro">Mach es dir angenehm.</p>
     <div class="settings-row"><span>Darstellung</span><div class="theme-options" role="group" aria-label="Darstellung"><button data-theme="light" aria-label="Hell" title="Hell">${icon('sun')}</button><button data-theme="dark" aria-label="Dunkel" title="Dunkel">${icon('moon')}</button><button data-theme="system" aria-label="Wie das Gerät" title="Wie das Gerät"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></button></div></div>
     <label class="settings-row highlight-setting"><span>Freie Steine hervorheben</span><input type="checkbox" id="highlight-free" role="switch"><span class="switch-track" aria-hidden="true"></span></label>
-    <details><summary>So wird gespielt</summary><p>Entferne zwei gleiche Steine. Ein Stein ist frei, wenn kein anderer auf ihm liegt und seine linke oder rechte Seite offen ist.</p><p>Alle Startstellungen sind lösbar. Deine Zugwahl kann Wege versperren. „Reset“ stellt die ursprüngliche Startstellung dieser Runde wieder her.</p><p>Im Hochformat dreht sich die Anordnung. Die Reihen verlaufen dann senkrecht: Oben oder unten muss frei sein. In den Einstellungen kannst du freie Steine hervorheben lassen.</p><p>Vergrößern: Ziehe auf dem Spielfeld zwei Finger auseinander. Danach kannst du das Feld mit einem Finger verschieben. Auf dem Trackpad funktioniert die Zoomgeste ebenfalls. Tastatur: Pfeiltasten und Enter, H für Hinweis, R für Reset, +/− für Zoom und 0 für die Gesamtansicht, Strg/⌘ + Z für Zurück.</p></details>
+    <details><summary>So wird gespielt</summary><p>Entferne zwei gleiche Steine. Ein Stein ist frei, wenn kein anderer auf ihm liegt und seine linke oder rechte Seite offen ist.</p><p>Alle Startstellungen sind lösbar. Deine Zugwahl kann Wege versperren. „Mischen“ verteilt die übrigen Steine neu und lösbar; dabei wird der Zugverlauf gelöscht. „Reset“ stellt die ursprüngliche Startstellung dieser Runde wieder her. Beide Aktionen fragen vorher nach.</p><p>Im Hochformat dreht sich die Anordnung. Die Reihen verlaufen dann senkrecht: Oben oder unten muss frei sein. In den Einstellungen kannst du freie Steine hervorheben lassen.</p><p>Vergrößern: Ziehe auf dem Spielfeld zwei Finger auseinander. Danach kannst du das Feld mit einem Finger verschieben. Auf dem Trackpad funktioniert die Zoomgeste ebenfalls. Tastatur: Pfeiltasten und Enter, H für Hinweis, M für Mischen, R für Reset, +/− für Zoom und 0 für die Gesamtansicht, Strg/⌘ + Z für Zurück.</p></details>
     <button class="text-button" id="install" hidden>${icon('download')} App installieren</button>
+  </dialog>
+  <dialog id="confirm-action" aria-labelledby="confirm-title" aria-describedby="confirm-description">
+    <span class="confirmation-icon" aria-hidden="true"></span>
+    <h1 id="confirm-title"></h1><p id="confirm-description"></p>
+    <div class="confirmation-actions"><button class="secondary-button" id="cancel-action" autofocus>Abbrechen</button><button class="primary-button" id="accept-action"></button></div>
   </dialog>
   <dialog id="victory" aria-labelledby="victory-title"><div class="victory-mark" aria-hidden="true">${faceSVG(34)}</div><span class="eyebrow">ALLE STEINE, EIN MOMENT RUHE</span><h1 id="victory-title">Schön gelöst<span class="title-dot">.</span></h1><p>Das Feld ist frei. Der Kopf vielleicht auch.</p><button class="primary-button" id="play-again">Noch eine Runde</button><button class="text-button close-victory">Spielfeld ansehen</button></dialog>
 `;
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const board = $('#board'), arena = $('#arena');
 const settings = $<HTMLDialogElement>('#settings'), victory = $<HTMLDialogElement>('#victory');
+const confirmation = $<HTMLDialogElement>('#confirm-action');
+const newGameDialog = $<HTMLDialogElement>('#new-game-dialog');
 let tileElements = new Map<number, HTMLButtonElement>();
 let toastTimer: ReturnType<typeof setTimeout>;
 let hintTimer: ReturnType<typeof setTimeout>;
@@ -99,6 +117,7 @@ function buildBoard(animate = true) {
     const el = document.createElement('button');
     el.className = `tile${animate ? ' entering' : ''}`;
     el.dataset.id = String(tile.id);
+    el.dataset.level = String(tile.z);
     el.innerHTML = `<span class="tile-face">${faceSVG(tile.face)}</span>`;
     el.style.setProperty('--delay', `${Math.min(tile.id * 3, 380)}ms`);
     el.addEventListener('click', () => chooseTile(tile.id));
@@ -120,18 +139,20 @@ function layoutBoard() {
   const ratio = portrait && window.innerHeight < 650 ? 1.16 : 1.34;
   const columns = (portrait ? maxY - minY : maxX - minX) + 1;
   const rows = (portrait ? maxX - minX : maxY - minY) + 1;
-  const width = Math.min((rect.width - 20) / (columns + .38), (rect.height - 14) / (rows * ratio + .38), 66);
+  const maxLevel = Math.max(...game.tiles.map(t => t.z));
+  const depthRatio = .16;
+  const width = Math.min((rect.width - 20) / (columns + maxLevel * depthRatio), (rect.height - 20) / (rows * ratio + maxLevel * depthRatio), 66);
   const height = width * ratio;
-  const depth = width * .115;
-  board.style.width = `${columns * width + depth * 2}px`;
-  board.style.height = `${rows * height + depth * 2}px`;
+  const depth = width * depthRatio;
+  board.style.width = `${columns * width + depth * maxLevel}px`;
+  board.style.height = `${rows * height + depth * maxLevel}px`;
   board.style.setProperty('--tile-width', `${width}px`);
   board.style.setProperty('--tile-height', `${height}px`);
   for (const tile of game.tiles) {
     const el = tileElements.get(tile.id);
     if (!el) continue;
     const x = (portrait ? maxY - tile.y : tile.x - minX) * width + tile.z * depth;
-    const y = (portrait ? tile.x - minX : tile.y - minY) * height + (2 - tile.z) * depth;
+    const y = (portrait ? tile.x - minX : tile.y - minY) * height + (maxLevel - tile.z) * depth;
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
     el.style.zIndex = String(tile.z * 1000 + Math.round(y) * 2 + Math.round(x / 100));
@@ -153,17 +174,19 @@ function renderState() {
     el.classList.toggle('dimmed', highlightFree && !available);
     el.classList.toggle('selected', selected === t.id);
     el.classList.toggle('hinted', hinted.includes(t.id));
-    el.setAttribute('aria-label', `${faceLabel(t.face)}, ${available ? 'frei' : 'blockiert'}`);
+    el.setAttribute('aria-label', `${faceLabel(t.face)}, Ebene ${t.z + 1}, ${available ? 'frei' : 'blockiert'}`);
     el.setAttribute('aria-disabled', String(!available));
     el.setAttribute('aria-pressed', String(selected === t.id));
     el.tabIndex = t.id === focusId ? 0 : -1;
   }
   $<HTMLButtonElement>('#menu').disabled = busy;
+  $<HTMLButtonElement>('#open-new-game').disabled = busy;
   $<HTMLButtonElement>('#undo').disabled = busy || !game.history.length;
   $<HTMLButtonElement>('#hint').disabled = busy || !pairs.length;
-  $<HTMLButtonElement>('#reset').disabled = busy || game.removed.length === 0;
+  $<HTMLButtonElement>('#reset').disabled = busy || !canReset();
+  $<HTMLButtonElement>('#shuffle').disabled = busy || active.length < 2;
   $('#board-message').hidden = active.length === 0 || pairs.length > 0;
-  $('#announcer').textContent = `${active.length / 2} Paare übrig. ${pairs.length ? `${pairs.length} freie Kombinationen.` : active.length ? 'Kein freies Paar. Nutze Zurück oder Reset.' : 'Geschafft!'}`;
+  $('#announcer').textContent = `${active.length / 2} Paare übrig. ${pairs.length ? `${pairs.length} freie Kombinationen.` : active.length ? 'Kein freies Paar. Nutze Mischen, Zurück oder Reset.' : 'Geschafft!'}`;
   persist();
 }
 function clearSelection() { selected = null; hinted = []; clearTimeout(hintTimer); }
@@ -306,39 +329,101 @@ function showHint() {
   clearTimeout(hintTimer);
   hintTimer = setTimeout(() => { hinted = []; renderState(); }, 4000);
 }
+function canReset() { return game.removed.length > 0 || game.tiles.some(t => t.face !== game.initialFaces[t.id]); }
 function resetRound() {
-  if (busy || !game.removed.length) return;
+  if (busy || !canReset()) return;
   reset(game);
   clearSelection(); resetView(); buildBoard();
   toast('Zurück am Anfang. Gleiche Steine, neue Chance.');
 }
+function requestAction(action: 'shuffle' | 'reset') {
+  if (busy || confirmation.open || settings.open || newGameDialog.open || victory.open) return;
+  if (action === 'reset' ? !canReset() : activeTiles(game).length < 2) return;
+  pendingAction = action;
+  $('#confirm-title').textContent = action === 'shuffle' ? 'Neu mischen?' : 'Runde zurücksetzen?';
+  $('#confirm-description').textContent = action === 'shuffle'
+    ? 'Die übrigen Steine werden neu verteilt. Entfernte Steine bleiben entfernt. Der Verlauf für „Zurück“ wird gelöscht.'
+    : 'Alle Steine kehren in ihre ursprüngliche Startstellung zurück. Dein Fortschritt und der Zugverlauf werden gelöscht.';
+  $('#accept-action').textContent = action === 'shuffle' ? 'Mischen' : 'Zurücksetzen';
+  $('.confirmation-icon').innerHTML = icon(action === 'shuffle' ? 'shuffle' : 'reset');
+  confirmation.showModal();
+  $('#cancel-action').focus();
+}
+$('#cancel-action').addEventListener('click', () => confirmation.close());
+confirmation.addEventListener('close', () => { pendingAction = null; });
+$('#accept-action').addEventListener('click', () => {
+  const action = pendingAction;
+  confirmation.close();
+  if (action === 'reset') resetRound();
+  else if (action === 'shuffle') void shuffleRound();
+});
+async function shuffleRound() {
+  if (busy) return;
+  busy = true; clearSelection(); renderState();
+  const before = activeTiles(game).map(t => ({ id: t.id, face: t.face }));
+  const success = reshuffle(game);
+  if (success && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const destinations = new Map<number, { x: number; y: number }[]>();
+    for (const t of activeTiles(game)) {
+      const el = tileElements.get(t.id)!;
+      const points = destinations.get(t.face) ?? [];
+      points.push({ x: parseFloat(el.style.left), y: parseFloat(el.style.top) });
+      destinations.set(t.face, points);
+    }
+    await Promise.all(before.map((t, i) => {
+      const el = tileElements.get(t.id)!, target = destinations.get(t.face)!.pop()!;
+      const x = target.x - parseFloat(el.style.left), y = target.y - parseFloat(el.style.top);
+      el.style.zIndex = String(10000 + i);
+      return el.animate([
+        { transform: 'translate(0, 0)' },
+        { transform: `translate(${x * .5}px, ${y * .5 - 12}px) rotate(${i % 2 ? 4 : -4}deg)` },
+        { transform: `translate(${x}px, ${y}px)` },
+      ], { duration: 520, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' }).finished.catch(() => {});
+    }));
+  }
+  buildBoard(false); busy = false; renderState();
+  toast(success ? 'Neu gemischt. Die übrigen Steine sind lösbar.' : 'Diese Anordnung lässt sich nicht mischen. Gehe einen Zug zurück.');
+}
 $('#undo').addEventListener('click', undoMove);
 $('#hint').addEventListener('click', showHint);
-$('#reset').addEventListener('click', resetRound);
-$('#menu').addEventListener('click', openSettings);
-function openSettings() {
-  chosenLayout = game.layout; updateLayoutChoice();
-  settings.showModal();
+$('#reset').addEventListener('click', () => requestAction('reset'));
+$('#shuffle').addEventListener('click', () => requestAction('shuffle'));
+$('#menu').addEventListener('click', () => settings.showModal());
+$('#open-new-game').addEventListener('click', openNewGame);
+function openNewGame() {
+  chosenLayout = game.layout; chosenDifficulty = game.difficulty ?? 'hard'; updateLayoutChoice();
+  newGameDialog.showModal();
 }
 function updateLayoutChoice() {
-  document.querySelectorAll<HTMLButtonElement>('[data-layout]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.layout === chosenLayout)));
+  document.querySelectorAll<HTMLButtonElement>('[data-layout]').forEach(b => {
+    b.setAttribute('aria-pressed', String(b.dataset.layout === chosenLayout));
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-difficulty]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.difficulty === chosenDifficulty)));
+  updateLayoutPreviews();
 }
 document.querySelectorAll<HTMLButtonElement>('[data-layout]').forEach(b => b.addEventListener('click', () => { chosenLayout = b.dataset.layout as LayoutId; updateLayoutChoice(); }));
+document.querySelectorAll<HTMLButtonElement>('[data-difficulty]').forEach(b => b.addEventListener('click', () => { chosenDifficulty = b.dataset.difficulty as DifficultyId; updateLayoutChoice(); }));
 document.querySelectorAll<HTMLButtonElement>('[data-theme]').forEach(b => b.addEventListener('click', () => {
   theme = b.dataset.theme!; applyTheme();
   try { localStorage.setItem(THEME_KEY, theme); } catch { /* Optional preference. */ }
 }));
 function startGame() {
   clearSelection(); hintIndex = 0; resetView();
-  game = createGame(chosenLayout);
-  settings.close(); if (victory.open) victory.close();
+  game = createGame(chosenLayout, Math.random, chosenDifficulty);
+  newGameDialog.close(); if (victory.open) victory.close();
   buildBoard();
 }
 $('#new-game').addEventListener('click', startGame);
-$('#play-again').addEventListener('click', () => { victory.close(); openSettings(); });
-$('.close-dialog').addEventListener('click', () => settings.close());
+$('#play-again').addEventListener('click', () => { victory.close(); openNewGame(); });
+document.querySelectorAll<HTMLButtonElement>('.close-dialog').forEach(button => button.addEventListener('click', () => button.closest('dialog')!.close()));
 $('.close-victory').addEventListener('click', () => victory.close());
-for (const dialog of [settings, victory]) dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dialog.close(); } });
+settings.addEventListener('close', () => {
+  if (!newGameDialog.open && !victory.open && !confirmation.open) $('#menu').focus({ preventScroll: true });
+});
+newGameDialog.addEventListener('close', () => {
+  if (!settings.open && !victory.open && !confirmation.open) $('#open-new-game').focus({ preventScroll: true });
+});
+for (const dialog of [settings, newGameDialog, victory, confirmation]) dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dialog.close(); } });
 
 function resetView() { zoomScale = 1; pan = { x: 0, y: 0 }; applyZoom(); }
 function clampPan() {
@@ -433,10 +518,11 @@ for (const type of ['gesturestart', 'gesturechange', 'gestureend']) arena.addEve
 // touch-action disables browser double-tap zoom while pointer gestures zoom the board.
 $('.table').addEventListener('dblclick', e => e.preventDefault());
 window.addEventListener('keydown', e => {
-  if (settings.open || victory.open || e.altKey || (e.target as HTMLElement).matches('input, textarea, select')) return;
+  if (settings.open || newGameDialog.open || victory.open || confirmation.open || e.altKey || (e.target as HTMLElement).matches('input, textarea, select')) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undoMove(); }
   else if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'h') showHint();
-  else if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'r') resetRound();
+  else if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'r') requestAction('reset');
+  else if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'm') requestAction('shuffle');
   else if (e.key === 'Escape' || e.key === '0') resetView();
   else if (['+', '=', '-'].includes(e.key) && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
@@ -450,10 +536,13 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) persi
 
 // Tiny layout silhouettes are drawn from the same coordinates as the game.
 import { positions } from './game';
-document.querySelectorAll<HTMLElement>('[data-preview]').forEach(el => {
-  const tiles = positions(el.dataset.preview as LayoutId);
+function updateLayoutPreviews() {
+ document.querySelectorAll<HTMLElement>('[data-preview]').forEach(el => {
+  const tiles = positions(el.dataset.preview as LayoutId, chosenDifficulty);
   el.innerHTML = `<svg viewBox="0 0 90 65">${tiles.map(t => `<rect x="${t.x * 5.4 + 5 + t.z}" y="${t.y * 6.4 + 5 - t.z}" width="4.8" height="5.8" rx=".8" opacity="${.3 + t.z * .28}" fill="currentColor"/>`).join('')}</svg>`;
-});
+ });
+}
+updateLayoutChoice();
 buildBoard();
 if (!game.removed.length) setTimeout(() => toast('Wähle zwei gleiche, freie Steine.', 5500), 1000);
 
