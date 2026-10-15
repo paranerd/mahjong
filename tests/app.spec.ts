@@ -11,6 +11,14 @@ test('matches, undo, save, settings and layout switching', async ({ page }) => {
   const [a, b] = matches(game)[0];
   await page.locator(`[data-id="${a.id}"]`).click();
   await expect(page.locator(`[data-id="${a.id}"]`)).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#arena').click({ position: { x: 2, y: 2 } });
+  await expect(page.locator('.selected')).toHaveCount(0);
+  await expect(page.locator(`[data-id="${a.id}"]`)).toHaveAttribute('aria-pressed', 'false');
+  await page.locator(`[data-id="${a.id}"]`).click();
+  await page.locator('.table').click({ position: { x: 2, y: 2 } });
+  await expect(page.locator('.selected')).toHaveCount(0);
+  await expect(page.locator('#remaining')).toHaveText('72');
+  await page.locator(`[data-id="${a.id}"]`).click();
   await page.locator(`[data-id="${b.id}"]`).click();
   await expect(page.locator('#remaining')).toHaveText('71');
   await expect(page.locator('.tile')).toHaveCount(142);

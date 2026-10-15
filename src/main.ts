@@ -516,6 +516,12 @@ for (const type of ['gesturestart', 'gesturechange', 'gestureend']) arena.addEve
   else if (type === 'gesturechange') zoomAt(safariScale * e.scale, e.clientX, e.clientY);
 }, { passive: false });
 // touch-action disables browser double-tap zoom while pointer gestures zoom the board.
+$('.table').addEventListener('click', e => {
+  if (selected === null || busy || performance.now() < suppressClickUntil) return;
+  if ((e.target as Element).closest('button')) return;
+  clearSelection();
+  renderState();
+});
 $('.table').addEventListener('dblclick', e => e.preventDefault());
 window.addEventListener('keydown', e => {
   if (settings.open || newGameDialog.open || victory.open || confirmation.open || e.altKey || (e.target as HTMLElement).matches('input, textarea, select')) return;
