@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -8,8 +8,8 @@ export default defineConfig({
   plugins: [{
     name: 'offline-cache',
     closeBundle() {
-      const html = readFileSync(resolve('dist/index.html'), 'utf8');
-      const files = [...html.matchAll(/(?:src|href)="(\.\/assets\/[^\"]+)"/g)].map(m => m[1]);
+      // Include imported images too, so the Arcade mascot remains available offline.
+      const files = readdirSync(resolve('dist/assets')).map(file => `./assets/${file}`);
       const assets = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-192.png', './icons/icon-512.png', ...files];
       const hash = createHash('sha256');
       assets.filter(file => file !== './').forEach(file => hash.update(readFileSync(resolve('dist', file))));

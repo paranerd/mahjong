@@ -1,3 +1,5 @@
+import { validArcadeRound, type ArcadeRound } from './arcade';
+
 export type LayoutId = 'turtle' | 'bridge' | 'lotus';
 export type DifficultyId = 'easy' | 'medium' | 'hard';
 export interface Position { id: number; x: number; y: number; z: number }
@@ -11,6 +13,7 @@ export interface Game {
   removed: number[];
   history: number[][];
   started: number;
+  arcade?: ArcadeRound;
 }
 export const layouts: { id: LayoutId; name: string; description: string }[] = [
   { id: 'turtle', name: 'Schildkröte', description: 'Der Klassiker' },
@@ -153,6 +156,7 @@ export function reset(game: Game): void {
   game.removed = [];
   game.history = [];
   game.started = Date.now();
+  if (game.arcade) game.arcade.penalty = 0;
 }
 export function reshuffle(game: Game, random = Math.random): boolean {
   const active = activeTiles(game);
@@ -175,6 +179,7 @@ export function validSavedGame(value: unknown): value is Game {
   if (!value || typeof value !== 'object') return false;
   const g = value as Game;
   if (g.version !== 1 || !layouts.some(l => l.id === g.layout) || !Array.isArray(g.tiles) || !Array.isArray(g.removed) || !Array.isArray(g.history) || !Number.isFinite(g.started)) return false;
+  if (g.arcade !== undefined && !validArcadeRound(g.arcade)) return false;
   if (g.difficulty !== undefined && !difficulties.some(d => d.id === g.difficulty)) return false;
   const expected = g.difficulty === undefined ? legacyPositions(g.layout) : positions(g.layout, g.difficulty);
   if (g.tiles.length !== expected.length || !Array.isArray(g.initialFaces) || g.initialFaces.length !== expected.length || !g.initialFaces.every(f => Number.isInteger(f) && f >= 0 && f < 36)) return false;
