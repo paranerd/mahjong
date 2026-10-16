@@ -40,7 +40,7 @@ test('matches, undo, save, settings and layout switching', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-for (const [width, height] of [[1440, 900], [390, 844], [844, 390], [320, 568], [768, 1024]]) {
+for (const [width, height] of [[1440, 900], [390, 844], [844, 390], [568, 320], [320, 568], [768, 1024]]) {
   test(`fits ${width}×${height} without scrolling or cropped tiles`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await page.goto('./');
@@ -56,6 +56,15 @@ for (const [width, height] of [[1440, 900], [390, 844], [844, 390], [320, 568], 
     expect(result.overflow).toBe(false);
     expect(result.cropped).toBe(0);
     expect(result.minWidth).toBeGreaterThan(20);
+    if (width > height) {
+      const tools = await page.locator('.tools').boundingBox();
+      const actions = await page.locator('.corner-actions').boundingBox();
+      expect(tools!.height).toBeGreaterThan(tools!.width);
+      expect(Math.abs(tools!.y + tools!.height / 2 - height / 2)).toBeLessThan(1);
+      expect(tools!.x + tools!.width).toBeLessThanOrEqual(width - 12);
+      expect(tools!.y).toBeGreaterThan(actions!.y + actions!.height + 5);
+      expect(await page.locator('.tile').evaluateAll((tiles, left) => tiles.every(t => t.getBoundingClientRect().right <= left - 12), tools!.x)).toBe(true);
+    }
     await expect(page.locator('#toast')).toHaveCSS('opacity', '1');
     const toast = await page.locator('#toast').boundingBox();
     const info = await page.locator('.round-info').boundingBox();

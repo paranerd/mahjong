@@ -352,3 +352,26 @@ dialog .dialog-content > :last-child { margin-bottom: 0; }
   #confirm-action h1 { font-size: 28px; margin: 12px 0 10px; }
   #confirm-action .confirmation-icon { width: 36px; height: 36px; }
 }
+
+@media (orientation: landscape) {
+  .table, .table.arcade {
+    .tools {
+      top: 50%; bottom: auto; left: auto; right: max(18px, env(safe-area-inset-right));
+      transform: translateY(-50%); flex-direction: column;
+      width: 86px; max-width: none;
+      height: min(286px, calc(100dvh - (var(--hud-top) + 54px) * 2));
+      padding: 8px; gap: 2px; border-radius: 22px;
+      button {
+        flex: 1 1 0; width: 100%; min-height: 0; flex-direction: column; gap: 3px;
+        > svg { width: clamp(15px, 5vh, 21px); height: clamp(15px, 5vh, 21px); }
+        > span { font-size: clamp(8px, 2.8vh, 10px); line-height: 1.2; }
+      }
+      .tool-divider { flex: 0 0 1px; width: 42px; height: 1px; margin: 0; }
+    }
+    .arena {
+      right: max(124px, calc(env(safe-area-inset-right) + 106px));
+      bottom: max(24px, calc(env(safe-area-inset-bottom) + 14px));
+    }
+  }
+  .table.arcade .arena { left: max(26px, var(--panda-lane)); }
+}

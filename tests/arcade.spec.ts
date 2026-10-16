@@ -309,7 +309,14 @@ for (const [width, height] of [[1440, 900], [390, 844], [320, 568], [844, 390], 
     });
     expect(boxes.overflow).toBe(false);
     expect(boxes.arena.top).toBeGreaterThan(boxes.panel.bottom + 15);
-    expect(boxes.tiles.every(r => r.left >= 0 && r.top >= boxes.panel.bottom + 10 && r.right <= width && r.bottom <= boxes.tools.top)).toBe(true);
+    expect(boxes.tiles.every(r => r.left >= 0 && r.top >= boxes.panel.bottom + 10 && r.right <= width
+      && (width > height ? r.right <= boxes.tools.left - 12 : r.bottom <= boxes.tools.top))).toBe(true);
+    if (width > height) {
+      expect(boxes.tools.bottom - boxes.tools.top).toBeGreaterThan(boxes.tools.right - boxes.tools.left);
+      expect(Math.abs((boxes.tools.top + boxes.tools.bottom) / 2 - height / 2)).toBeLessThan(1);
+      expect(boxes.tools.right).toBeLessThanOrEqual(width - 12);
+      expect(boxes.tools.top).toBeGreaterThan(boxes.actions.bottom + 5);
+    }
     expect(boxes.panda.right).toBeLessThan(boxes.tools.left);
     expect(boxes.panda.right - boxes.panda.left).toBeGreaterThan(width <= 600 ? 48 : width > height && height <= 540 ? 52 : 80);
     expect(Math.abs((boxes.panel.left + boxes.panel.right) / 2 - (boxes.hud.left + boxes.hud.right) / 2)).toBeLessThan(1);
